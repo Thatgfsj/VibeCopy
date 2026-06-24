@@ -195,6 +195,11 @@ void CopyToClipboard(const std::wstring& text) {
 
 LRESULT CALLBACK ScrollWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
+        case WM_COMMAND: {
+            // 转发按钮点击到主窗口
+            SendMessage(g_hMainWnd, msg, wParam, lParam);
+            return 0;
+        }
         case WM_VSCROLL: {
             RECT rc;
             GetClientRect(hwnd, &rc);
