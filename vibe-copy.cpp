@@ -3,42 +3,56 @@
 #include <vector>
 #include <fstream>
 #include <sstream>
-#include <algorithm>
 
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
 
 // 全局变量
-std::vector<std::pair<std::string, std::string>> g_snippets;
+struct Snippet {
+    std::wstring displayName;
+    std::wstring actualText;
+};
+
+std::vector<Snippet> g_snippets;
 std::vector<HWND> g_buttons;
 HWND g_hStatus = NULL;
-HWND g_hTable = NULL;
-int g_buttonCount = 0;
 const int BUTTON_HEIGHT = 55;
-const int BUTTON_WIDTH = 380;
 const int PADDING = 10;
 const int STATUS_HEIGHT = 35;
 
-// 配置文件路径
-std::string GetConfigPath() {
-    char userProfile[MAX_PATH];
-    if (GetEnvironmentVariableA("USERPROFILE", userProfile, MAX_PATH)) {
-        std::string path = std::string(userProfile) + "\\.vibecopy\\copy.txt";
-        // 确保目录存在
-        CreateDirectoryA((std::string(userProfile) + "\\.vibecopy").c_str(), NULL);
+// UTF-8 转 UTF-16
+std::wstring Utf8ToWide(const std::string& utf8) {
+    if (utf8.empty()) return L"";
+    int size = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, NULL, 0);
+    std::wstring wide(size - 1, 0);
+    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, &wide[0], size);
+    return wide;
+}
+
+// 获取配置文件路径
+std::wstring GetConfigPath() {
+    wchar_t userProfile[MAX_PATH];
+    if (GetEnvironmentVariableW(L"USERPROFILE", userProfile, MAX_PATH)) {
+        std::wstring path = std::wstring(userProfile) + L"\\.vibecopy\\copy.txt";
+        CreateDirectoryW((std::wstring(userProfile) + L"\\.vibecopy").c_str(), NULL);
         return path;
     }
-    return "copy.txt";
+    return L"copy.txt";
 }
 
 // 读取配置文件
 void LoadSnippets() {
     g_snippets.clear();
-    std::string configPath = GetConfigPath();
-    std::ifstream file(configPath);
+    std::wstring configPath = GetConfigPath();
+
+    // 转换为窄字符串用于文件操作
+    int len = WideCharToMultiByte(CP_UTF8, 0, configPath.c_str(), -1, NULL, 0, NULL, NULL);
+    std::string narrowPath(len - 1, 0);
+    WideCharToMultiByte(CP_UTF8, 0, configPath.c_str(), -1, &narrowPath[0], len, NULL, NULL);
+
+    std::ifstream file(narrowPath);
     if (!file.is_open()) {
-        // 创建空配置文件
-        std::ofstream createFile(configPath);
+        std::ofstream createFile(narrowPath);
         createFile.close();
         return;
     }
@@ -51,17 +65,19 @@ void LoadSnippets() {
 
         std::string displayName, actualText;
 
-        // 检查 == 分隔符
         size_t eqPos = line.find("==");
         if (eqPos != std::string::npos) {
             displayName = line.substr(0, eqPos);
             actualText = line.substr(eqPos + 2);
         }
-        // 检查 (显示名) 实际文本 格式
-        else if (line[0] == '(' || line[0] == '\xEF\xBC\x88') { // ( or （
+        else if (!line.empty() && (line[0] == '(' || (unsigned char)line[0] == 0xEF)) {
             size_t closeParen = line.find(')');
             if (closeParen == std::string::npos) {
-                closeParen = line.find('\xEF\xBC\x89'); // ）
+                // 查找中文右括号 ）的 UTF-8 编码
+                closeParen = line.find('\xEF\xBC\x89');
+                if (closeParen != std::string::npos) {
+                    closeParen += 2; // 跳过 3 字节中的前 2 字节
+                }
             }
             if (closeParen != std::string::npos) {
                 displayName = line.substr(1, closeParen - 1);
@@ -71,13 +87,11 @@ void LoadSnippets() {
                 actualText = line;
             }
         }
-        // 默认：显示名=实际文本
         else {
             displayName = line;
             actualText = line;
         }
 
-        // 去除首尾空格
         auto trim = [](std::string& s) {
             s.erase(0, s.find_first_not_of(" \t\r\n"));
             s.erase(s.find_last_not_of(" \t\r\n") + 1);
@@ -86,48 +100,47 @@ void LoadSnippets() {
         trim(actualText);
 
         if (!displayName.empty()) {
-            g_snippets.push_back({displayName, actualText});
+            g_snippets.push_back({Utf8ToWide(displayName), Utf8ToWide(actualText)});
         }
     }
     file.close();
 }
 
 // 复制到剪贴板
-void CopyToClipboard(const std::string& text) {
+void CopyToClipboard(const std::wstring& text) {
     if (!OpenClipboard(NULL)) return;
     EmptyClipboard();
-    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, text.size() + 1);
+
+    // 复制 Unicode 文本
+    size_t len = (text.size() + 1) * sizeof(wchar_t);
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
     if (hMem) {
-        char* pMem = (char*)GlobalLock(hMem);
-        memcpy(pMem, text.c_str(), text.size() + 1);
+        wchar_t* pMem = (wchar_t*)GlobalLock(hMem);
+        memcpy(pMem, text.c_str(), len);
         GlobalUnlock(hMem);
-        SetClipboardData(CF_TEXT, hMem);
+        SetClipboardData(CF_UNICODETEXT, hMem);
     }
     CloseClipboard();
 }
 
 // 更新状态栏
-void UpdateStatus(const std::string& text) {
+void UpdateStatus(const std::wstring& text) {
     if (g_hStatus) {
-        std::string display = "已复制: " + text.substr(0, 60);
-        SetWindowTextA(g_hStatus, display.c_str());
+        std::wstring display = L"已复制: " + text.substr(0, 60);
+        SetWindowTextW(g_hStatus, display.c_str());
     }
 }
 
 // 创建按钮
 void CreateButtons(HWND hwnd) {
-    // 清除旧按钮
     for (HWND hBtn : g_buttons) {
         DestroyWindow(hBtn);
     }
     g_buttons.clear();
-    g_buttonCount = 0;
 
-    // 计算布局
     RECT clientRect;
     GetClientRect(hwnd, &clientRect);
     int tableWidth = clientRect.right - 2 * PADDING;
-    int tableHeight = clientRect.bottom - STATUS_HEIGHT - 3 * PADDING;
     int btnWidth = (tableWidth - PADDING) / 2;
     int col = 0, row = 0;
 
@@ -135,21 +148,19 @@ void CreateButtons(HWND hwnd) {
         int x = PADDING + col * (btnWidth + PADDING);
         int y = PADDING + row * (BUTTON_HEIGHT + PADDING);
 
-        HWND hBtn = CreateWindowA(
-            "BUTTON", g_snippets[i].first.c_str(),
+        HWND hBtn = CreateWindowW(
+            L"BUTTON", g_snippets[i].displayName.c_str(),
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_MULTILINE,
             x, y, btnWidth, BUTTON_HEIGHT,
             hwnd, (HMENU)(INT_PTR)(1000 + i), NULL, NULL
         );
 
-        // 设置字体
-        HFONT hFont = CreateFontA(-16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        HFONT hFont = CreateFontW(-16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
+            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
         SendMessage(hBtn, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         g_buttons.push_back(hBtn);
-        g_buttonCount++;
 
         col++;
         if (col >= 2) {
@@ -163,18 +174,16 @@ void CreateButtons(HWND hwnd) {
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
         case WM_CREATE: {
-            // 创建状态栏
-            g_hStatus = CreateWindowA("STATIC", "准备就绪... 单击大色块即可复制",
+            g_hStatus = CreateWindowW(L"STATIC", L"准备就绪... 单击大色块即可复制",
                 WS_CHILD | WS_VISIBLE | SS_LEFT,
                 PADDING, 0, 0, STATUS_HEIGHT,
                 hwnd, NULL, NULL, NULL);
 
-            HFONT hFont = CreateFontA(-16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+            HFONT hFont = CreateFontW(-16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
+                CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
             SendMessage(g_hStatus, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-            // 加载配置并创建按钮
             LoadSnippets();
             CreateButtons(hwnd);
             break;
@@ -183,12 +192,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_SIZE: {
             RECT clientRect;
             GetClientRect(hwnd, &clientRect);
-
-            // 更新状态栏位置
             MoveWindow(g_hStatus, PADDING, clientRect.bottom - STATUS_HEIGHT - PADDING,
                 clientRect.right - 2 * PADDING, STATUS_HEIGHT, TRUE);
-
-            // 重新创建按钮
             CreateButtons(hwnd);
             break;
         }
@@ -197,8 +202,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             int id = LOWORD(wParam);
             if (id >= 1000 && id < 1000 + (int)g_snippets.size()) {
                 int index = id - 1000;
-                CopyToClipboard(g_snippets[index].second);
-                UpdateStatus(g_snippets[index].second);
+                CopyToClipboard(g_snippets[index].actualText);
+                UpdateStatus(g_snippets[index].actualText);
             }
             break;
         }
@@ -208,29 +213,27 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
 
         default:
-            return DefWindowProc(hwnd, msg, wParam, lParam);
+            return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
     return 0;
 }
 
 // 主函数
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
-    // 注册窗口类
-    WNDCLASSEXA wc = {0};
-    wc.cbSize = sizeof(WNDCLASSEXA);
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow) {
+    WNDCLASSEXW wc = {0};
+    wc.cbSize = sizeof(WNDCLASSEXW);
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-    wc.lpszClassName = "VibeCopyClass";
+    wc.lpszClassName = L"VibeCopyClass";
     wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
-    RegisterClassExA(&wc);
+    RegisterClassExW(&wc);
 
-    // 创建窗口
-    HWND hwnd = CreateWindowExA(
+    HWND hwnd = CreateWindowExW(
         WS_EX_TOPMOST,
-        "VibeCopyClass", "VibeCopy 鼠标速复",
+        L"VibeCopyClass", L"VibeCopy 鼠标速复",
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT, 800, 300,
         NULL, NULL, hInstance, NULL
@@ -241,7 +244,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     ShowWindow(hwnd, nCmdShow);
     UpdateWindow(hwnd);
 
-    // 消息循环
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
         TranslateMessage(&msg);
