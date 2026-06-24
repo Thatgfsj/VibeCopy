@@ -51,7 +51,7 @@ $status.Size = New-Object System.Drawing.Size(780, 35)
 $status.Text = "准备就绪... 单击大色块即可复制"
 $status.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
 
-$global:fileName = "复制配置文件.txt"
+$global:fileName = "copy.txt"
 
 function Load-Snippets {
     $table.Controls.Clear()

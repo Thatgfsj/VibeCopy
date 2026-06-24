@@ -26,9 +26,9 @@ std::string GetConfigPath() {
     std::string fullPath(path);
     size_t pos = fullPath.find_last_of("\\/");
     if (pos != std::string::npos) {
-        return fullPath.substr(0, pos + 1) + "复制配置文件.txt";
+        return fullPath.substr(0, pos + 1) + "copy.txt";
     }
-    return "复制配置文件.txt";
+    return "copy.txt";
 }
 
 // 读取配置文件
