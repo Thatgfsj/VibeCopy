@@ -51,7 +51,12 @@ $status.Size = New-Object System.Drawing.Size(780, 35)
 $status.Text = "准备就绪... 单击大色块即可复制"
 $status.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
 
-$global:fileName = "copy.txt"
+$global:fileName = Join-Path $env:USERPROFILE ".vibecopy\copy.txt"
+# 确保目录存在
+$dir = Split-Path $global:fileName
+if (-not (Test-Path $dir)) {
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+}
 
 function Load-Snippets {
     $table.Controls.Clear()

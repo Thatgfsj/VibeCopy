@@ -21,12 +21,12 @@ const int STATUS_HEIGHT = 35;
 
 // 配置文件路径
 std::string GetConfigPath() {
-    char path[MAX_PATH];
-    GetModuleFileNameA(NULL, path, MAX_PATH);
-    std::string fullPath(path);
-    size_t pos = fullPath.find_last_of("\\/");
-    if (pos != std::string::npos) {
-        return fullPath.substr(0, pos + 1) + "copy.txt";
+    char userProfile[MAX_PATH];
+    if (GetEnvironmentVariableA("USERPROFILE", userProfile, MAX_PATH)) {
+        std::string path = std::string(userProfile) + "\\.vibecopy\\copy.txt";
+        // 确保目录存在
+        CreateDirectoryA((std::string(userProfile) + "\\.vibecopy").c_str(), NULL);
+        return path;
     }
     return "copy.txt";
 }
