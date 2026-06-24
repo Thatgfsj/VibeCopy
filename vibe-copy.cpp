@@ -72,15 +72,31 @@ void LoadSnippets(HWND hwnd) {
             displayName = line.substr(0, eqPos);
             actualText = line.substr(eqPos + 2);
         }
-        else if (!line.empty() && (line[0] == '(' || line[0] == '\xEF')) {
-            size_t closeParen = line.find(')');
+        // 检查英文括号 ( 或中文括号 （
+        else if (!line.empty() && (line[0] == '(' ||
+                 (line.size() >= 3 && (unsigned char)line[0] == 0xEF &&
+                  (unsigned char)line[1] == 0xBC && (unsigned char)line[2] == 0x88))) {
+            size_t closeParen = std::string::npos;
+            // 查找英文右括号 )
+            closeParen = line.find(')');
             if (closeParen == std::string::npos) {
-                size_t pos = line.find('\xEF\xBC\x89');
-                if (pos != std::string::npos) closeParen = pos + 2;
+                // 查找中文右括号 ） EF BC 89
+                for (size_t i = 0; i + 2 < line.size(); i++) {
+                    if ((unsigned char)line[i] == 0xEF &&
+                        (unsigned char)line[i+1] == 0xBC &&
+                        (unsigned char)line[i+2] == 0x89) {
+                        closeParen = i;
+                        break;
+                    }
+                }
             }
             if (closeParen != std::string::npos) {
-                displayName = line.substr(1, closeParen - 1);
-                actualText = line.substr(closeParen + 1);
+                // 确定左括号的长度（英文1字节，中文3字节）
+                size_t openLen = (line[0] == '(') ? 1 : 3;
+                displayName = line.substr(openLen, closeParen - openLen);
+                // 确定右括号的长度
+                size_t closeLen = (line[closeParen] == ')') ? 1 : 3;
+                actualText = line.substr(closeParen + closeLen);
             } else {
                 displayName = line;
                 actualText = line;
