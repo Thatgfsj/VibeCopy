@@ -56,10 +56,16 @@ void LoadSnippets(HWND hwnd) {
 
     std::ifstream file(narrowPath);
     if (!file.is_open()) {
+        // 创建默认配置文件
         std::ofstream createFile(narrowPath);
+        createFile << "继续\n";
+        createFile << "（端对端测试）在虚拟环境中进行一次端对端的测试\n";
         createFile.close();
-        SetWindowTextW(g_hStatus, L"已创建 copy.txt，请点击'编辑配置'添加内容。");
-        return;
+        file.open(narrowPath);
+        if (!file.is_open()) {
+            SetWindowTextW(g_hStatus, L"无法创建配置文件。");
+            return;
+        }
     }
 
     std::string line;
